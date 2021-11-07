@@ -125,6 +125,11 @@ class FileExplorerWindow(Tk):
         self.mainloop()
     # __init__ ends here
 
+    def browser_refresh(self, event=None):
+        # This function will refresh the browser and list all the items inside the current working directory
+        for item in os.listdir(self.current_dir):
+            pass
+
     def search_bar_focus_in(self, event=None):
         # This function will remove the greyed out "Search..." indicator and let the user type in the search key
         if self.search_bar.get() == 'Search ' + os.path.split(self.current_dir)[1]:
