@@ -1,5 +1,6 @@
 from tkinter import *
 from tkinter import ttk
+from datetime import datetime
 import os
 
 
@@ -24,6 +25,7 @@ class FileExplorerWindow(Tk):
         self.file_menu = Menu(self.menu)
         self.menu.add_cascade(label='File', menu=self.file_menu)
         self.file_menu.add_command(label='Open new window', command=lambda: FileExplorerWindow())
+        self.file_menu.add_command(label='Refresh', command=self.refresh_browser)
         self.file_menu.add_command(label='Settings', command=None)   # TODO: a function that opens a settings window
         self.file_menu.add_separator()  # Separator can be use to separate groups of options
         self.file_menu.add_command(label='Help', command=None)    # TODO: a function that displays a help menu
@@ -109,14 +111,26 @@ class FileExplorerWindow(Tk):
         self.columnconfigure(1, weight=1)
         self.rowconfigure(1, weight=1)
         # list of files and folders inside the current directory
-        # We'll need a scrollbar to scroll the list vertically
-        self.browser_scrollbar = ttk.Scrollbar(self.main_frame, orient=VERTICAL)
-        self.browser_scrollbar.grid(row=0, column=1, sticky=N+S+E)
+        # We'll need 2 scrollbars to scroll the list vertically and horizontally
+        self.browser_vertical_scrollbar = ttk.Scrollbar(self.main_frame, orient=VERTICAL)
+        self.browser_vertical_scrollbar.grid(row=0, column=1, sticky=N+S+E)
+        self.browser_horizontal_scrollbar = ttk.Scrollbar(self.main_frame, orient=HORIZONTAL)
+        self.browser_horizontal_scrollbar.grid(row=1, column=0, columnspan=2, sticky=S+E+W)
         self.browser_list = ttk.Treeview(self.main_frame,
                                          selectmode=EXTENDED,
-                                         yscrollcommand=self.browser_scrollbar.set)
+                                         yscrollcommand=self.browser_vertical_scrollbar.set,
+                                         xscrollcommand=self.browser_horizontal_scrollbar.set)
         self.browser_list.grid(row=0, column=0, sticky=N+S+E+W)
-        self.browser_scrollbar.config(command=self.browser_list.yview)
+        self.browser_vertical_scrollbar.config(command=self.browser_list.yview)
+        self.browser_horizontal_scrollbar.config(command=self.browser_list.xview)
+        # Define columns in browser: Name, Date modified, Type, Size
+        self.browser_list['columns'] = ('Name', 'Date modified', 'Type', 'Size')
+        # Format columns:
+        self.browser_list.column('#0', width=0, minwidth=0, stretch=NO)
+        for column in self.browser_list['columns']:
+            self.browser_list.column(column, minwidth=40, stretch=NO)
+            self.browser_list.heading(column, text=column)
+        self.refresh_browser()
         # The browser view is the main component => Put more weight to it.
         self.main_frame.columnconfigure(0, weight=1)
         self.main_frame.rowconfigure(0, weight=1)
@@ -125,10 +139,39 @@ class FileExplorerWindow(Tk):
         self.mainloop()
     # __init__ ends here
 
-    def browser_refresh(self, event=None):
+    def refresh_browser(self, event=None):
         # This function will refresh the browser and list all the items inside the current working directory
-        for item in os.listdir(self.current_dir):
-            pass
+        # First we clear the current list
+        for item in self.browser_list.get_children():
+            self.browser_list.delete(item)
+        # Stats viewed for each item include: Name, Date modified, Type, Size
+        count = 0
+        for item in sorted(os.listdir(self.current_dir)):
+            # Get date. It'll be in timestamp format
+            date_modified = os.stat(item).st_mtime
+            # We have to change obtained date to human-readable format
+            date_modified = datetime.fromtimestamp(date_modified)
+            # Get the name of the item
+            name = os.path.split(item)[1]
+            # The type of the item is the file extension, or nothing if it's a folder
+            file_type = os.path.splitext(item)[1]
+            if file_type == '':
+                file_type = 'Folder'
+            # Get the size of the item. It'll be in bytes
+            size = os.stat(item).st_size
+            units = ('KB', 'MB', 'GB', 'TB')    # Hopefully no one actually has an item that exceeds 1024 TB
+            size_unit = 'Bytes'
+            for i in range(len(units)):
+                if size >= 1024:
+                    size = round(size/1024)
+                    size_unit = units[i]
+                else:
+                    break
+            self.browser_list.insert(parent='',
+                                     iid=count,
+                                     index=END if os.path.isfile(item) else 0,  # Folders => head, files => rear
+                                     values=(name, date_modified, file_type, str(size) + ' ' + size_unit))
+            count += 1
 
     def search_bar_focus_in(self, event=None):
         # This function will remove the greyed out "Search..." indicator and let the user type in the search key
