@@ -192,6 +192,10 @@ class FileExplorerWindow(Tk):
                                      index=END if os.path.isfile(item) else 0,  # Folders => head, files => rear
                                      values=(name, date_modified, file_type, str(size) + ' ' + size_unit))
             count += 1
+        # Reset search bar, since the current directory has changed
+        self.search_bar.delete(0, END)
+        self.style.configure('Search.TEntry', foreground='grey')
+        self.search_bar.insert(0, 'Search ' + os.path.split(self.current_dir)[1])
 
     def open_folder(self, event=None):
         # Add the current directory to back stack
