@@ -2,6 +2,7 @@ from tkinter import *
 from tkinter import ttk
 from datetime import datetime
 import os
+import subprocess
 
 
 class FileExplorerWindow(Tk):
@@ -141,6 +142,8 @@ class FileExplorerWindow(Tk):
             self.browser_list.heading(column, text=column)
         self.refresh_browser()
         # Bindings:
+        self.browser_list.tag_bind('file', '<Double-1>', callback=self.execute_file)
+        self.browser_list.tag_bind('file', '<Return>', callback=self.execute_file)
         self.browser_list.tag_bind('folder', '<Double-1>', callback=self.open_folder)
         self.browser_list.tag_bind('folder', '<Return>', callback=self.open_folder)
         # The browser view is the main component => Put more weight to it.
@@ -196,6 +199,11 @@ class FileExplorerWindow(Tk):
         self.search_bar.delete(0, END)
         self.style.configure('Search.TEntry', foreground='grey')
         self.search_bar.insert(0, 'Search ' + os.path.split(self.current_dir)[1])
+
+    def execute_file(self, event=None):
+        for file in self.browser_list.selection():
+            file_name = self.browser_list.item(file, 'values')[0]
+            subprocess.run(file_name, shell=True)
 
     def open_folder(self, event=None):
         # Add the current directory to back stack
