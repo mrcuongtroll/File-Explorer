@@ -11,6 +11,10 @@ class FileExplorerWindow(Tk):
         # This variable is to keep track of the directory we're currently browsing
         self.current_dir = directory
 
+        # These stacks are used to keep track of back/forward paths:
+        self.back_stack = []
+        self.forward_stack = []
+
         # root window.
         self.title(title)
         self.geometry(size)
@@ -52,15 +56,20 @@ class FileExplorerWindow(Tk):
         self.upper_frame = ttk.Frame(self, relief=FLAT, padding=2)
         self.upper_frame.grid(row=0, column=0, columnspan=2, sticky=E+W)
         # This button takes you back to your previous browsing directory
-        self.back_button = ttk.Button(self.upper_frame, text='<<')
+        self.back_button = ttk.Button(self.upper_frame,
+                                      text='<<',
+                                      state=DISABLED,
+                                      command=self.back_button_clicked)
         self.back_button.grid(row=0, column=0, sticky=W)
         # This button forwards you to where you used the Back button
-        self.forward_button = ttk.Button(self.upper_frame, text='>>')
+        self.forward_button = ttk.Button(self.upper_frame,
+                                         text='>>',
+                                         state=DISABLED,
+                                         command=self.forward_button_clicked)
         self.forward_button.grid(row=0, column=1)
         # This button takes you up 1 step in the directory tree
-        self.up_button = ttk.Button(self.upper_frame, text='^')
+        self.up_button = ttk.Button(self.upper_frame, text='^', command=self.up_button_clicked)
         self.up_button.grid(row=0, column=2)
-        # TODO: give the above buttons functionality
         # Directory bar: You can type the path you want to browse directly
         # You can also choose from frequently browsed paths in the drop-down menu
         self.dir_bar = ttk.Combobox(self.upper_frame, text=self.current_dir)
@@ -131,6 +140,9 @@ class FileExplorerWindow(Tk):
             self.browser_list.column(column, minwidth=40, stretch=NO)
             self.browser_list.heading(column, text=column)
         self.refresh_browser()
+        # Bindings:
+        self.browser_list.tag_bind('folder', '<Double-1>', callback=self.open_folder)
+        self.browser_list.tag_bind('folder', '<Return>', callback=self.open_folder)
         # The browser view is the main component => Put more weight to it.
         self.main_frame.columnconfigure(0, weight=1)
         self.main_frame.rowconfigure(0, weight=1)
@@ -144,6 +156,11 @@ class FileExplorerWindow(Tk):
         # First we clear the current list
         for item in self.browser_list.get_children():
             self.browser_list.delete(item)
+        # Then we change to the current working directory:
+        os.chdir(self.current_dir)
+        # ... and rewrite it to the directory bar:
+        self.dir_bar.delete(0, END)
+        self.dir_bar.insert(0, self.current_dir)
         # Stats viewed for each item include: Name, Date modified, Type, Size
         count = 0
         for item in sorted(os.listdir(self.current_dir)):
@@ -155,8 +172,10 @@ class FileExplorerWindow(Tk):
             name = os.path.split(item)[1]
             # The type of the item is the file extension, or nothing if it's a folder
             file_type = os.path.splitext(item)[1]
-            if file_type == '':
+            if not os.path.isfile(item):
                 file_type = 'Folder'
+            if file_type == '':
+                file_type = 'File'
             # Get the size of the item. It'll be in bytes
             size = os.stat(item).st_size
             units = ('KB', 'MB', 'GB', 'TB')    # Hopefully no one actually has an item that exceeds 1024 TB
@@ -169,9 +188,58 @@ class FileExplorerWindow(Tk):
                     break
             self.browser_list.insert(parent='',
                                      iid=count,
+                                     tag='file' if os.path.isfile(item) else 'folder',
                                      index=END if os.path.isfile(item) else 0,  # Folders => head, files => rear
                                      values=(name, date_modified, file_type, str(size) + ' ' + size_unit))
             count += 1
+
+    def open_folder(self, event=None):
+        # Add the current directory to back stack
+        self.back_stack.append(self.current_dir)
+        self.back_button.config(state=NORMAL)   # Also enable the back button
+        # Clean forward stack and disable forward button
+        self.forward_stack.clear()
+        self.forward_button.config(state=DISABLED)
+        # Get new directory from the select folder name
+        selected_folder = self.browser_list.selection()[0]
+        folder_name = self.browser_list.item(selected_folder, 'values')[0]
+        self.current_dir = os.path.join(self.current_dir, folder_name)
+        self.refresh_browser()
+
+    def up_button_clicked(self, event=None):
+        # Add the current directory to back stack
+        self.back_stack.append(self.current_dir)
+        self.back_button.config(state=NORMAL)  # Also enable the back button
+        # Clean forward stack and disable forward button
+        self.forward_stack.clear()
+        self.forward_button.config(state=DISABLED)
+        # Up one node in directory tree
+        self.current_dir = os.path.split(self.current_dir)[0]
+        self.refresh_browser()
+
+    def back_button_clicked(self, event=None):
+        # We need to make sure that the back stack is not empty
+        if self.back_stack:
+            # Add the current directory to forward stack
+            self.forward_stack.append(self.current_dir)
+            self.forward_button.config(state=NORMAL)  # Also enable the forward button
+            # Get the latest path from the stack
+            self.current_dir = self.back_stack.pop()
+            if not self.back_stack:     # Also disable the back button if back stack is empty
+                self.back_button.config(state=DISABLED)
+            self.refresh_browser()
+
+    def forward_button_clicked(self, event=None):
+        # We need to make sure that the forward stack is not empty
+        if self.forward_stack:
+            # Add the current directory to back stack
+            self.back_stack.append(self.current_dir)
+            self.back_button.config(state=NORMAL)   # Also enable the back button
+            # Get the latest path from forward stack
+            self.current_dir = self.forward_stack.pop()
+            if not self.forward_stack:      # Also disable forward button if forward stack is empty
+                self.forward_button.config(state=DISABLED)
+            self.refresh_browser()
 
     def search_bar_focus_in(self, event=None):
         # This function will remove the greyed out "Search..." indicator and let the user type in the search key

@@ -8,3 +8,5 @@ File Explorer app made with Python
   - The browser can now be refreshed. It can be refreshed manually 
     using the refresh option in File menu, or will be refreshed automatically 
     when the user browses a new directory.
+- 11/09/2021:
+  - The user can browse directories.
