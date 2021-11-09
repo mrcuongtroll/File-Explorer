@@ -10,3 +10,4 @@ File Explorer app made with Python
     when the user browses a new directory.
 - 11/09/2021:
   - The user can browse directories.
+  - Executable files can now be opened from the browser.
