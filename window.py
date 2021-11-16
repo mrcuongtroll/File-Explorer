@@ -85,6 +85,7 @@ class FileExplorerWindow(Tk):
         self.search_bar.insert(0, 'Search ' + os.path.split(self.current_dir)[1])
         self.search_bar.bind('<FocusIn>', self.search_bar_focus_in)
         self.search_bar.bind('<FocusOut>', self.search_bar_focus_out)
+        self.search_bar.bind('<Return>', self.search)
         # TODO: give search bar an actual search function
 
         # Left frame: Including Quick access and My computer
@@ -268,3 +269,23 @@ class FileExplorerWindow(Tk):
             self.search_bar.delete(0, END)
             self.style.configure('Search.TEntry', foreground='grey')
             self.search_bar.insert(0, 'Search ' + os.path.split(self.current_dir)[1])
+
+    def search(self, event=None):
+        # When you press enter in the search bar, the browser will filter out the items whose name contains
+        # the searched key word
+        if self.search_bar.get() == '':
+            # If there's nothing in the search bar, then simply refresh the browser
+            self.refresh_browser()
+            self.browser_list.focus_set()
+        else:
+            temp = self.search_bar.get()
+            self.refresh_browser()
+            self.search_bar.delete(0, END)
+            self.search_bar.insert(0, temp)
+            for item in self.browser_list.get_children():
+                if self.search_bar.get().lower() not in self.browser_list.item(item, 'values')[0].lower():
+                    self.browser_list.delete(item)
+            self.dir_bar.delete(0, END)
+            self.dir_bar.insert(0,
+                                f'Search result for "{self.search_bar.get()}" in {os.path.split(self.current_dir)[1]}')
+            self.browser_list.focus_set()
