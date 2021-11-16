@@ -14,3 +14,4 @@ File Explorer app made with Python
 - 11/16/2021:
   - The user can now use the search bar to search 
     for items whose name contains the search keyword.
+  - The user can now go to a particular directory by using the directory bar.

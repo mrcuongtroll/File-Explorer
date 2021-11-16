@@ -77,6 +77,10 @@ class FileExplorerWindow(Tk):
         self.dir_bar.grid(row=0, column=3, sticky=E+W)
         self.dir_bar.insert(0, self.current_dir)
         self.upper_frame.columnconfigure(3, weight=1)
+        self.dir_bar.bind('<FocusIn>', self.dir_bar_focus_in)
+        self.dir_bar.bind('<FocusOut>', self.dir_bar_focus_out)
+        self.dir_bar.bind('<Return>', self.dir_browse)
+        self.dir_bar.bind('<<ComboboxSelected>>', self.dir_select)
         # TODO: give dir_bar functionality
         # Search bar: You can search for a file name within the directory you're currently browsing
         self.style.configure('Search.TEntry', background='white', foreground='grey')
@@ -86,7 +90,6 @@ class FileExplorerWindow(Tk):
         self.search_bar.bind('<FocusIn>', self.search_bar_focus_in)
         self.search_bar.bind('<FocusOut>', self.search_bar_focus_out)
         self.search_bar.bind('<Return>', self.search)
-        # TODO: give search bar an actual search function
 
         # Left frame: Including Quick access and My computer
         self.left_frame = ttk.Frame(self, relief=FLAT, padding=2)
@@ -150,7 +153,7 @@ class FileExplorerWindow(Tk):
         # The browser view is the main component => Put more weight to it.
         self.main_frame.columnconfigure(0, weight=1)
         self.main_frame.rowconfigure(0, weight=1)
-        # TODO: add functionality to the browser
+        # TODO: add right click menu
 
         self.mainloop()
     # __init__ ends here
@@ -164,7 +167,9 @@ class FileExplorerWindow(Tk):
         os.chdir(self.current_dir)
         # ... and rewrite it to the directory bar:
         self.dir_bar.delete(0, END)
-        self.dir_bar.insert(0, self.current_dir)
+        current_dir = self.current_dir.split('\\')
+        current_dir = ' > '.join(current_dir)
+        self.dir_bar.insert(0, current_dir)
         # Stats viewed for each item include: Name, Date modified, Type, Size
         count = 0
         for item in sorted(os.listdir(self.current_dir)):
@@ -254,6 +259,7 @@ class FileExplorerWindow(Tk):
                 self.forward_button.config(state=DISABLED)
             self.refresh_browser()
 
+    # Functions related to search bar (3 functions)
     def search_bar_focus_in(self, event=None):
         # This function will remove the greyed out "Search..." indicator and let the user type in the search key
         if self.search_bar.get() == 'Search ' + os.path.split(self.current_dir)[1]:
@@ -276,11 +282,11 @@ class FileExplorerWindow(Tk):
         if self.search_bar.get() == '':
             # If there's nothing in the search bar, then simply refresh the browser
             self.refresh_browser()
-            self.browser_list.focus_set()
         else:
             temp = self.search_bar.get()
             self.refresh_browser()
             self.search_bar.delete(0, END)
+            self.style.configure('Search.TEntry', foreground='black')
             self.search_bar.insert(0, temp)
             for item in self.browser_list.get_children():
                 if self.search_bar.get().lower() not in self.browser_list.item(item, 'values')[0].lower():
@@ -288,4 +294,32 @@ class FileExplorerWindow(Tk):
             self.dir_bar.delete(0, END)
             self.dir_bar.insert(0,
                                 f'Search result for "{self.search_bar.get()}" in {os.path.split(self.current_dir)[1]}')
-            self.browser_list.focus_set()
+        self.browser_list.focus_set()
+
+    # Functions related to directory bar (* functions)
+    def dir_bar_focus_in(self, event=None):
+        self.dir_bar.delete(0, END)
+        self.dir_bar.insert(0, self.current_dir)
+        self.dir_bar.select_range(0, END)
+
+    def dir_bar_focus_out(self, event=None):
+        self.dir_bar.delete(0, END)
+        current_dir = self.current_dir.split('\\')
+        current_dir = ' > '.join(current_dir)
+        self.dir_bar.insert(0, current_dir)
+
+    def dir_browse(self, event=None):
+        if self.dir_bar.get() == self.current_dir:
+            pass
+        else:
+            try:
+                # If an error is raised after this line, then the directory doesn't exist
+                os.chdir(self.dir_bar.get())
+                self.current_dir = self.dir_bar.get()
+                self.refresh_browser()
+            except WindowsError:
+                pass
+        self.browser_list.focus_set()
+
+    def dir_select(self, event=None):
+        pass
