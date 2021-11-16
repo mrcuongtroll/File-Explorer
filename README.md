@@ -11,3 +11,6 @@ File Explorer app made with Python
 - 11/09/2021:
   - The user can browse directories.
   - Executable files can now be opened from the browser.
+- 11/16/2021:
+  - The user can now use the search bar to search 
+    for items whose name contains the search keyword.
