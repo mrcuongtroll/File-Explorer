@@ -215,7 +215,9 @@ class FileExplorerWindow(Tk):
                                      iid=count,
                                      tag='file' if os.path.isfile(item) else 'folder',
                                      index=END if os.path.isfile(item) else 0,  # Folders => head, files => rear
-                                     values=(name, date_modified, file_type, str(size) + ' ' + size_unit))
+                                     values=(name, date_modified, file_type,
+                                             str(size) + ' ' + size_unit if os.path.isfile(item) else '')
+                                     )
             count += 1
         # Reset search bar, since the current directory has changed
         self.search_bar.delete(0, END)
