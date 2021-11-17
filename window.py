@@ -11,10 +11,24 @@ class FileExplorerWindow(Tk):
         super().__init__()
         # This variable is to keep track of the directory we're currently browsing
         self.current_dir = directory
+        self.data_path = os.path.join(os.getcwd(), 'data/')
 
         # These stacks are used to keep track of back/forward paths:
         self.back_stack = []
         self.forward_stack = []
+
+        # This list is to keep track of recent directories
+        self.recent_dirs_list = []
+        try:
+            with open(os.path.join(self.data_path, 'dirs_list.bin'), 'rb') as f:
+                directories = f.read().decode('utf-8')
+                self.recent_dirs_list = directories.split('\n')
+        except FileNotFoundError:
+            try:
+                os.makedirs(self.data_path)
+            except FileExistsError:
+                pass
+        # TODO: Load recent directories from file
 
         # root window.
         self.title(title)
@@ -73,7 +87,7 @@ class FileExplorerWindow(Tk):
         self.up_button.grid(row=0, column=2)
         # Directory bar: You can type the path you want to browse directly
         # You can also choose from frequently browsed paths in the drop-down menu
-        self.dir_bar = ttk.Combobox(self.upper_frame, text=self.current_dir)
+        self.dir_bar = ttk.Combobox(self.upper_frame, text=self.current_dir, values=self.recent_dirs_list)
         self.dir_bar.grid(row=0, column=3, sticky=E+W)
         self.dir_bar.insert(0, self.current_dir)
         self.upper_frame.columnconfigure(3, weight=1)
@@ -81,6 +95,7 @@ class FileExplorerWindow(Tk):
         self.dir_bar.bind('<FocusOut>', self.dir_bar_focus_out)
         self.dir_bar.bind('<Return>', self.dir_browse)
         self.dir_bar.bind('<<ComboboxSelected>>', self.dir_select)
+        self.dir_bar.bind('<Destroy>', self.dir_bar_destroy)
         # TODO: give dir_bar functionality
         # Search bar: You can search for a file name within the directory you're currently browsing
         self.style.configure('Search.TEntry', background='white', foreground='grey')
@@ -144,7 +159,6 @@ class FileExplorerWindow(Tk):
         for column in self.browser_list['columns']:
             self.browser_list.column(column, minwidth=40, stretch=NO)
             self.browser_list.heading(column, text=column)
-        self.refresh_browser()
         # Bindings:
         self.browser_list.tag_bind('file', '<Double-1>', callback=self.execute_file)
         self.browser_list.tag_bind('file', '<Return>', callback=self.execute_file)
@@ -155,9 +169,11 @@ class FileExplorerWindow(Tk):
         self.main_frame.rowconfigure(0, weight=1)
         # TODO: add right click menu
 
+        self.refresh_browser()
         self.mainloop()
     # __init__ ends here
 
+    # An important function that is used very often
     def refresh_browser(self, event=None):
         # This function will refresh the browser and list all the items inside the current working directory
         # First we clear the current list
@@ -205,6 +221,9 @@ class FileExplorerWindow(Tk):
         self.search_bar.delete(0, END)
         self.style.configure('Search.TEntry', foreground='grey')
         self.search_bar.insert(0, 'Search ' + os.path.split(self.current_dir)[1])
+        # Put the path in the head of recent directories list
+        self.add_recent_dir()
+    # refresh_browser ends here
 
     def execute_file(self, event=None):
         for file in self.browser_list.selection():
@@ -296,7 +315,7 @@ class FileExplorerWindow(Tk):
                                 f'Search result for "{self.search_bar.get()}" in {os.path.split(self.current_dir)[1]}')
         self.browser_list.focus_set()
 
-    # Functions related to directory bar (* functions)
+    # Functions related to directory bar (6 functions)
     def dir_bar_focus_in(self, event=None):
         self.dir_bar.delete(0, END)
         self.dir_bar.insert(0, self.current_dir)
@@ -322,4 +341,20 @@ class FileExplorerWindow(Tk):
         self.browser_list.focus_set()
 
     def dir_select(self, event=None):
-        pass
+        self.current_dir = self.dir_bar.get()
+        self.refresh_browser()
+        self.browser_list.focus_set()
+
+    def dir_bar_destroy(self, event=None):
+        # TODO: write recent directories to a file
+        with open(os.path.join(self.data_path, 'dirs_list.bin'), 'wb') as f:
+            f.write('\n'.join(self.recent_dirs_list).encode('utf-8'))
+
+    def add_recent_dir(self):
+        if self.current_dir in self.recent_dirs_list:
+            self.recent_dirs_list.remove(self.current_dir)
+        self.recent_dirs_list.insert(0, self.current_dir)
+        while len(self.recent_dirs_list) > 20:
+            # We should only keep the latest 20 directories
+            self.recent_dirs_list.pop()
+        self.dir_bar['values'] = self.recent_dirs_list
