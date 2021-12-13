@@ -19,3 +19,4 @@ File Explorer app made with Python
   - Recent directories can be accessed from the directory bar's drop down list.
 - 12/13/2021:
   - User can now quickly navigate to Local Disk Drives on the PC (Windows only).
+  - User can now pin favourite folders to Quick Access.

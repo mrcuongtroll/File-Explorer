@@ -4,16 +4,22 @@ from datetime import datetime
 import os
 import subprocess
 import sys
-import win32api, win32con, pywintypes
+import win32api
+import win32con
+import pywintypes
 
 
 class FileExplorerWindow(Tk):
 
-    def __init__(self, title='File Explorer', size='640x480', theme_name='vista', directory=os.getcwd()):
+    def __init__(self, title='File Explorer', size='640x480', theme_name='vista', directory=os.getcwd(),
+                 data_path=None):
         super().__init__()
         # This variable is to keep track of the directory we're currently browsing
         self.current_dir = directory
-        self.data_path = os.path.join(os.getcwd(), 'data/')
+        if not data_path:
+            self.data_path = os.path.join(os.getcwd(), 'data/')
+        else:
+            self.data_path = data_path
 
         # These stacks are used to keep track of back/forward paths:
         self.back_stack = []
@@ -31,6 +37,9 @@ class FileExplorerWindow(Tk):
             except FileExistsError:
                 pass
 
+        # This list is to keep track of directories pinned to quick access
+        self.pinned_list = []
+
         # root window.
         self.title(title)
         self.geometry(size)
@@ -44,7 +53,8 @@ class FileExplorerWindow(Tk):
         # File menu contains basic options for an app like settings, help, exit...
         self.file_menu = Menu(self.menu)
         self.menu.add_cascade(label='File', menu=self.file_menu)
-        self.file_menu.add_command(label='Open new window', command=lambda: FileExplorerWindow())
+        self.file_menu.add_command(label='Open new window',
+                                   command=lambda: FileExplorerWindow(data_path=self.data_path))
         self.file_menu.add_command(label='Refresh', command=self.refresh_browser)
         self.file_menu.add_command(label='Settings', command=None)   # TODO: a function that opens a settings window
         self.file_menu.add_separator()  # Separator can be use to separate groups of options
@@ -54,6 +64,8 @@ class FileExplorerWindow(Tk):
         # Edit menu contains options to work with, and/or manipulate files and folders
         self.edit_menu = Menu(self.menu)
         self.menu.add_cascade(label='Edit', menu=self.edit_menu)
+        self.edit_menu.add_command(label='Pin to quick access', command=self.pin_dir)
+        self.edit_menu.add_separator()
         self.edit_menu.add_command(label='New folder', command=None) # TODO: give this functionality
         self.edit_menu.add_command(label='Select all', command=None)  # TODO: give this functionality
         self.edit_menu.add_command(label='Select none', command=None)  # TODO: give this functionality
@@ -116,22 +128,28 @@ class FileExplorerWindow(Tk):
         self.quick_access_scrollbar = ttk.Scrollbar(self.quick_access, orient=VERTICAL)
         self.quick_access_scrollbar.pack(side=RIGHT, fill=Y, expand=True)
         self.quick_access_list = ttk.Treeview(self.quick_access,
-                                              selectmode=EXTENDED,
-                                              yscrollcommand=self.quick_access_scrollbar.set)
+                                              selectmode=BROWSE,
+                                              yscrollcommand=self.quick_access_scrollbar.set,
+                                              show='')
         self.quick_access_list.pack(side=LEFT, fill=Y, expand=True)
         self.quick_access_scrollbar.config(command=self.quick_access_list.yview)
+        self.quick_access_list['columns'] = 'Name'
+        self.quick_access_list.column('#0', width=0, minwidth=0, stretch=NO)
+        self.quick_access_list.column('Name')
         # TODO: add stuff to quick access
+        self.quick_access_list.tag_bind('pinned', '<Double-1>', self.open_pinned_dir)
+        self.quick_access_list.tag_bind('pinned', '<Return>', self.open_pinned_dir)
         # My computer: lets you quickly access the disk drives (C, D, E...)
         self.my_computer = ttk.LabelFrame(self.left_frame, text='This PC')
         self.my_computer.pack(side=BOTTOM, fill=Y, expand=True)
-        self.my_computer_yscrollbar = ttk.Scrollbar(self.my_computer, orient=VERTICAL)
-        self.my_computer_yscrollbar.pack(side=RIGHT, fill=Y)
+        self.my_computer_scrollbar = ttk.Scrollbar(self.my_computer, orient=VERTICAL)
+        self.my_computer_scrollbar.pack(side=RIGHT, fill=Y)
         self.my_computer_list = ttk.Treeview(self.my_computer,
                                              selectmode=BROWSE,
-                                             yscrollcommand=self.my_computer_yscrollbar.set,
-                                             show='tree')
+                                             yscrollcommand=self.my_computer_scrollbar.set,
+                                             show='')
         self.my_computer_list.pack(fill=Y, expand=True)
-        self.my_computer_yscrollbar.config(command=self.my_computer_list.yview)
+        self.my_computer_scrollbar.config(command=self.my_computer_list.yview)
         self.my_computer_list['columns'] = 'Name'
         self.my_computer_list.column('#0', width=0, minwidth=0, stretch=NO)
         self.my_computer_list.column('Name')
@@ -142,7 +160,6 @@ class FileExplorerWindow(Tk):
             drive_list = subprocess.Popen('wmic logicaldisk get name,description', shell=True, stdout=subprocess.PIPE)
             drive_list, err = drive_list.communicate()
             drive_list = ''.join([chr(b) for b in drive_list]).replace('\r', '').strip().split('\n')[1:]
-            # driveLines = drivelisto.split('\n')
             for i in range(len(drive_list)):
                 self.my_computer_list.insert(parent='',
                                              iid=i,
@@ -198,6 +215,7 @@ class FileExplorerWindow(Tk):
         self.mainloop()
     # __init__ ends here
 
+    # Functions related to the main browser ()
     # An important function that is used very often
     def refresh_browser(self, event=None):
         # This function will refresh the browser and list all the items inside the current working directory
@@ -257,6 +275,8 @@ class FileExplorerWindow(Tk):
         self.search_bar.insert(0, 'Search ' + os.path.split(self.current_dir)[1])
         # Put the path in the head of recent directories list
         self.add_recent_dir()
+        # Refresh quick access occasionally
+        self.refresh_quick_access()
     # refresh_browser ends here
 
     def execute_file(self, event=None):
@@ -275,8 +295,10 @@ class FileExplorerWindow(Tk):
         selected_folder = self.browser_list.selection()[0]
         folder_name = self.browser_list.item(selected_folder, 'values')[0]
         self.current_dir = os.path.join(self.current_dir, folder_name).replace('/', '\\')
+        self.title(folder_name)
         self.refresh_browser()
 
+    # Function related to My Computer (1 function)
     def open_drive(self, event=None):
         # Add the current directory to back stack
         self.back_stack.append(self.current_dir)
@@ -287,8 +309,10 @@ class FileExplorerWindow(Tk):
         # Get new directory from the select folder name
         selected_drive = self.my_computer_list.selection()[0]
         self.current_dir = self.my_computer_list.item(selected_drive, 'values')[0].split()[-1] + '\\'
+        self.title(self.my_computer_list.item(selected_drive, 'values')[0])
         self.refresh_browser()
 
+    # Functions related to the navigation buttons (back, forward, up) (3 functions)
     def up_button_clicked(self, event=None):
         # Add the current directory to back stack
         self.back_stack.append(self.current_dir)
@@ -323,6 +347,55 @@ class FileExplorerWindow(Tk):
             if not self.forward_stack:      # Also disable forward button if forward stack is empty
                 self.forward_button.config(state=DISABLED)
             self.refresh_browser()
+
+    # Functions related to quick access (3 functions)
+    def refresh_quick_access(self, event=None):
+        # Clear the current quick access
+        for item in self.quick_access_list.get_children():
+            self.quick_access_list.delete(item)
+        # Read the directories stored in the data file
+        try:
+            with open(os.path.join(self.data_path, 'pinned_list.bin'), 'rb') as f:
+                directories = f.read().decode('utf-8')
+                self.pinned_list = directories.split('\n')
+        except FileNotFoundError:
+            try:
+                os.makedirs(self.data_path)
+            except FileExistsError:
+                pass
+        # Add read directories to quick access
+        for i in range(len(self.pinned_list)):
+            dir_name = os.path.split(self.pinned_list[i])[1]
+            self.quick_access_list.insert(parent='',
+                                          iid=i,
+                                          tag='pinned',
+                                          index=END,
+                                          values=(dir_name,))
+
+    def pin_dir(self, event=None):
+        for selected_folder in self.browser_list.selection():
+            # Only folders can be pinned
+            if self.browser_list.item(selected_folder)['tags'][0] == 'folder':
+                selected_folder = self.browser_list.item(selected_folder, 'values')[0]
+                selected_dir = os.path.join(self.current_dir, selected_folder)
+                if selected_dir not in self.pinned_list:
+                    self.pinned_list.append(selected_dir)
+        with open(os.path.join(self.data_path, 'pinned_list.bin'), 'wb') as f:
+            f.write('\n'.join(self.pinned_list).encode('utf-8'))
+        self.refresh_quick_access()
+
+    def open_pinned_dir(self, event=None):
+        # Add the current directory to back stack
+        self.back_stack.append(self.current_dir)
+        self.back_button.config(state=NORMAL)  # Also enable the back button
+        # Clean forward stack and disable forward button
+        self.forward_stack.clear()
+        self.forward_button.config(state=DISABLED)
+        # Get new directory from the select folder name
+        selected_dir = int(self.quick_access_list.selection()[0])
+        self.current_dir = self.pinned_list[selected_dir]
+        self.title(self.quick_access_list.item(selected_dir, 'values')[0])
+        self.refresh_browser()
 
     # Functions related to search bar (3 functions)
     def search_bar_focus_in(self, event=None):
