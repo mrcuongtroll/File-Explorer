@@ -3,6 +3,8 @@ from tkinter import ttk
 from datetime import datetime
 import os
 import subprocess
+import sys
+import win32api, win32con, pywintypes
 
 
 class FileExplorerWindow(Tk):
@@ -28,7 +30,6 @@ class FileExplorerWindow(Tk):
                 os.makedirs(self.data_path)
             except FileExistsError:
                 pass
-        # TODO: Load recent directories from file
 
         # root window.
         self.title(title)
@@ -96,7 +97,6 @@ class FileExplorerWindow(Tk):
         self.dir_bar.bind('<Return>', self.dir_browse)
         self.dir_bar.bind('<<ComboboxSelected>>', self.dir_select)
         self.dir_bar.bind('<Destroy>', self.dir_bar_destroy)
-        # TODO: give dir_bar functionality
         # Search bar: You can search for a file name within the directory you're currently browsing
         self.style.configure('Search.TEntry', background='white', foreground='grey')
         self.search_bar = ttk.Entry(self.upper_frame, style='Search.TEntry')
@@ -124,14 +124,39 @@ class FileExplorerWindow(Tk):
         # My computer: lets you quickly access the disk drives (C, D, E...)
         self.my_computer = ttk.LabelFrame(self.left_frame, text='This PC')
         self.my_computer.pack(side=BOTTOM, fill=Y, expand=True)
-        self.my_computer_scrollbar = ttk.Scrollbar(self.my_computer, orient=VERTICAL)
-        self.my_computer_scrollbar.pack(side=RIGHT, fill=Y, expand=TRUE)
+        self.my_computer_yscrollbar = ttk.Scrollbar(self.my_computer, orient=VERTICAL)
+        self.my_computer_yscrollbar.pack(side=RIGHT, fill=Y)
         self.my_computer_list = ttk.Treeview(self.my_computer,
-                                             selectmode=EXTENDED,
-                                             yscrollcommand=self.my_computer_scrollbar.set)
+                                             selectmode=BROWSE,
+                                             yscrollcommand=self.my_computer_yscrollbar.set,
+                                             show='tree')
         self.my_computer_list.pack(fill=Y, expand=True)
-        self.my_computer_scrollbar.config(command=self.my_computer_list.yview)
-        # TODO: add stuff to my computer
+        self.my_computer_yscrollbar.config(command=self.my_computer_list.yview)
+        self.my_computer_list['columns'] = 'Name'
+        self.my_computer_list.column('#0', width=0, minwidth=0, stretch=NO)
+        self.my_computer_list.column('Name')
+        # on windows
+        # Get the fixed drives
+        # wmic logicaldisk get name,description
+        if 'win' in sys.platform:
+            drive_list = subprocess.Popen('wmic logicaldisk get name,description', shell=True, stdout=subprocess.PIPE)
+            drive_list, err = drive_list.communicate()
+            drive_list = ''.join([chr(b) for b in drive_list]).replace('\r', '').strip().split('\n')[1:]
+            # driveLines = drivelisto.split('\n')
+            for i in range(len(drive_list)):
+                self.my_computer_list.insert(parent='',
+                                             iid=i,
+                                             tag='drive',
+                                             index=END,
+                                             values=(drive_list[i].strip(),))
+        elif 'linux' in sys.platform:
+            # To be updated (perhaps in the future... Or maybe not)
+            pass
+        elif 'macos' in sys.platform:
+            # To be updated (perhaps in the future... Or maybe not)
+            pass
+        self.my_computer_list.tag_bind('drive', '<Double-1>', callback=self.open_drive)
+        self.my_computer_list.tag_bind('drive', '<Return>', callback=self.open_drive)
 
         # Main frame. The list of files and folders will be on this frame
         self.main_frame = ttk.Frame(self, relief=FLAT, padding=2)
@@ -189,6 +214,13 @@ class FileExplorerWindow(Tk):
         # Stats viewed for each item include: Name, Date modified, Type, Size
         count = 0
         for item in sorted(os.listdir(self.current_dir)):
+            # We'll ignore hidden files and system-protected files
+            try:
+                attribute = win32api.GetFileAttributes(os.path.join(self.current_dir, item))
+                if attribute & (win32con.FILE_ATTRIBUTE_HIDDEN | win32con.FILE_ATTRIBUTE_SYSTEM):
+                    continue
+            except pywintypes.error:
+                continue
             # Get date. It'll be in timestamp format
             date_modified = os.stat(item).st_mtime
             # We have to change obtained date to human-readable format
@@ -242,7 +274,19 @@ class FileExplorerWindow(Tk):
         # Get new directory from the select folder name
         selected_folder = self.browser_list.selection()[0]
         folder_name = self.browser_list.item(selected_folder, 'values')[0]
-        self.current_dir = os.path.join(self.current_dir, folder_name)
+        self.current_dir = os.path.join(self.current_dir, folder_name).replace('/', '\\')
+        self.refresh_browser()
+
+    def open_drive(self, event=None):
+        # Add the current directory to back stack
+        self.back_stack.append(self.current_dir)
+        self.back_button.config(state=NORMAL)  # Also enable the back button
+        # Clean forward stack and disable forward button
+        self.forward_stack.clear()
+        self.forward_button.config(state=DISABLED)
+        # Get new directory from the select folder name
+        selected_drive = self.my_computer_list.selection()[0]
+        self.current_dir = self.my_computer_list.item(selected_drive, 'values')[0].split()[-1] + '\\'
         self.refresh_browser()
 
     def up_button_clicked(self, event=None):
@@ -325,7 +369,7 @@ class FileExplorerWindow(Tk):
 
     def dir_bar_focus_out(self, event=None):
         self.dir_bar.delete(0, END)
-        current_dir = self.current_dir.split('\\')
+        current_dir = self.current_dir.replace('/', '\\').split('\\')
         current_dir = ' > '.join(current_dir)
         self.dir_bar.insert(0, current_dir)
 
@@ -336,7 +380,7 @@ class FileExplorerWindow(Tk):
             try:
                 # If an error is raised after this line, then the directory doesn't exist
                 os.chdir(self.dir_bar.get())
-                self.current_dir = self.dir_bar.get()
+                self.current_dir = self.dir_bar.get().replace('/', '\\')
                 self.refresh_browser()
             except WindowsError:
                 pass
@@ -348,7 +392,6 @@ class FileExplorerWindow(Tk):
         self.browser_list.focus_set()
 
     def dir_bar_destroy(self, event=None):
-        # TODO: write recent directories to a file
         with open(os.path.join(self.data_path, 'dirs_list.bin'), 'wb') as f:
             f.write('\n'.join(self.recent_dirs_list).encode('utf-8'))
 

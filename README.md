@@ -17,3 +17,5 @@ File Explorer app made with Python
   - The user can now go to a particular directory by using the directory bar.
 - 11/17/2021:
   - Recent directories can be accessed from the directory bar's drop down list.
+- 12/13/2021:
+  - User can now quickly navigate to Local Disk Drives on the PC (Windows only).
