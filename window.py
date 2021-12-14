@@ -1,17 +1,21 @@
 from tkinter import *
 from tkinter import ttk
+from tkinter import messagebox
 from datetime import datetime
 import os
 import subprocess
 import sys
+import shutil
 import win32api
 import win32con
 import pywintypes
+import utils
 
 
-class FileExplorerWindow(Tk):
+# Classes
+class _FileExplorerWindow(Tk):
 
-    def __init__(self, title='File Explorer', size='640x480', theme_name='vista', directory=os.getcwd(),
+    def __init__(self, title='File Explorer', size='640x480', theme='vista', directory=os.getcwd(),
                  data_path=None):
         super().__init__()
         # This variable is to keep track of the directory we're currently browsing
@@ -40,12 +44,16 @@ class FileExplorerWindow(Tk):
         # This list is to keep track of directories pinned to quick access
         self.pinned_list = []
 
+        # This variable tells the program if the data in clipboard is for copy or cut (should be 'copy', 'cut')
+        self.clipboard_type = StringVar()
+
         # root window.
         self.title(title)
         self.geometry(size)
         # We need a ttk.Style object to manage the style of widgets
         self.style = ttk.Style(self)
-        self.style.theme_use(theme_name)
+        self.theme = theme
+        self.style.theme_use(self.theme)
 
         # Menu: including menus
         self.menu = Menu(self)
@@ -53,32 +61,33 @@ class FileExplorerWindow(Tk):
         # File menu contains basic options for an app like settings, help, exit...
         self.file_menu = Menu(self.menu)
         self.menu.add_cascade(label='File', menu=self.file_menu)
-        self.file_menu.add_command(label='Open new window',
-                                   command=lambda: FileExplorerWindow(data_path=self.data_path))
-        self.file_menu.add_command(label='Refresh', command=self.refresh_browser)
-        self.file_menu.add_command(label='Settings', command=None)   # TODO: a function that opens a settings window
+        self.file_menu.add_command(label='Open', command=None, state=DISABLED)
         self.file_menu.add_separator()  # Separator can be use to separate groups of options
-        self.file_menu.add_command(label='Help', command=None)    # TODO: a function that displays a help menu
+        self.file_menu.add_command(label='Open new window',
+                                   command=lambda: _FileExplorerWindow(data_path=self.data_path))
+        self.file_menu.add_command(label='Refresh', command=self.refresh_browser)
+        self.file_menu.add_command(label='New folder', command=self.new_folder)
         self.file_menu.add_separator()
         self.file_menu.add_command(label='Exit', command=self.destroy)
         # Edit menu contains options to work with, and/or manipulate files and folders
         self.edit_menu = Menu(self.menu)
         self.menu.add_cascade(label='Edit', menu=self.edit_menu)
-        self.edit_menu.add_command(label='Pin to quick access', command=self.pin_dir)
+        self.edit_menu.add_command(label='Pin to quick access', state=DISABLED, command=self.pin_dir)
         self.edit_menu.add_separator()
-        self.edit_menu.add_command(label='New folder', command=None) # TODO: give this functionality
-        self.edit_menu.add_command(label='Select all', command=None)  # TODO: give this functionality
-        self.edit_menu.add_command(label='Select none', command=None)  # TODO: give this functionality
-        self.edit_menu.add_command(label='Invert selection', command=None)  # TODO: give this functionality
+        self.edit_menu.add_command(label='Select all', command=self.select_all)
+        self.edit_menu.add_command(label='Select none', command=self.select_none)
+        self.edit_menu.add_command(label='Invert selection', command=self.invert_selection)
         self.edit_menu.add_separator()
-        self.edit_menu.add_command(label='Open', command=None)   # TODO: give this functionality
-        self.edit_menu.add_command(label='Rename', command=None) # TODO: give this functionality
-        self.edit_menu.add_command(label='Delete', command=None) # TODO: give this functionality
+
+        self.edit_menu.add_command(label='Rename', state=DISABLED, command=self.browser_item_rename)
+        self.edit_menu.add_command(label='Delete', state=DISABLED, command=self.browser_item_delete)
         self.edit_menu.add_separator()
-        self.edit_menu.add_command(label='Copy', command=None)   # TODO: give this functionality
-        self.edit_menu.add_command(label='Copy path', command=None)  # TODO: give this functionality
-        self.edit_menu.add_command(label='Cut', command=None)    # TODO: give this functionality
-        self.edit_menu.add_command(label='Paste', command=None)  # TODO: give this functionality
+        self.edit_menu.add_command(label='Copy', state=DISABLED, command=lambda: self.clipboard_item('copy'))
+        self.edit_menu.add_command(label='Cut', state=DISABLED, command=lambda: self.clipboard_item('cut'))
+        self.edit_menu.add_command(label='Paste', state=DISABLED, command=self.paste_item)
+        # The Paste option should only be enabled whenever there is something in the clipboard
+        self.clipboard_type.trace_add('write', callback=lambda a1, a2, a3: self.trace_clipboard())
+        # I dunno why the callback requires 3 arguments nor what are they though.
 
         # Upper frame: a.k.a the toolbar
         self.upper_frame = ttk.Frame(self, relief=FLAT, padding=2)
@@ -136,7 +145,6 @@ class FileExplorerWindow(Tk):
         self.quick_access_list['columns'] = 'Name'
         self.quick_access_list.column('#0', width=0, minwidth=0, stretch=NO)
         self.quick_access_list.column('Name')
-        # TODO: add stuff to quick access
         self.quick_access_list.tag_bind('pinned', '<Double-1>', self.open_pinned_dir)
         self.quick_access_list.tag_bind('pinned', '<Return>', self.open_pinned_dir)
         # My computer: lets you quickly access the disk drives (C, D, E...)
@@ -204,8 +212,18 @@ class FileExplorerWindow(Tk):
         # Bindings:
         self.browser_list.tag_bind('file', '<Double-1>', callback=self.execute_file)
         self.browser_list.tag_bind('file', '<Return>', callback=self.execute_file)
+        self.browser_list.tag_bind('file', '<<TreeviewSelect>>',
+                                   callback=lambda event: self.browser_items_select(tag='file'))
         self.browser_list.tag_bind('folder', '<Double-1>', callback=self.open_folder)
         self.browser_list.tag_bind('folder', '<Return>', callback=self.open_folder)
+        self.browser_list.tag_bind('folder', '<<TreeviewSelect>>',
+                                   callback=lambda event: self.browser_items_select(tag='folder'))
+        self.browser_list.bind('<BackSpace>', self.backspace_pressed)
+        self.browser_list.bind('<Control-a>', self.select_all)
+        self.browser_list.bind('<Delete>', self.browser_item_delete)
+        self.browser_list.bind('<Control-c>', lambda event: self.clipboard_item('copy'))
+        self.browser_list.bind('<Control-x>', lambda event: self.clipboard_item('cut'))
+        self.browser_list.bind('<Control-v>', self.paste_item)
         # The browser view is the main component => Put more weight to it.
         self.main_frame.columnconfigure(0, weight=1)
         self.main_frame.rowconfigure(0, weight=1)
@@ -273,10 +291,15 @@ class FileExplorerWindow(Tk):
         self.search_bar.delete(0, END)
         self.style.configure('Search.TEntry', foreground='grey')
         self.search_bar.insert(0, 'Search ' + os.path.split(self.current_dir)[1])
+        # Reset menus, since all rows in the browser are now de-selected
+        self.reset_menus()
         # Put the path in the head of recent directories list
         self.add_recent_dir()
         # Refresh quick access occasionally
         self.refresh_quick_access()
+        # Remove focus from my computer
+        for sel in self.my_computer_list.selection():
+            self.my_computer_list.selection_remove(sel)
     # refresh_browser ends here
 
     def execute_file(self, event=None):
@@ -298,6 +321,170 @@ class FileExplorerWindow(Tk):
         self.title(folder_name)
         self.refresh_browser()
 
+    def browser_items_select(self, tag, event=None):
+        # This function is called when the selection that involves some items is changed in the browser
+        if not self.browser_list.selection():
+            # If nothing is selected on the browser, then deactivate some menu options
+            self.reset_menus()
+        else:
+            # Enable menu options based on the type of the selected items (files/folders)
+            if len(self.browser_list.selection()) == 1:
+                # These options should only be applied to one item at a time
+                if tag == 'file':
+                    self.file_menu.entryconfig('Open', state=NORMAL, command=self.execute_file)
+                    self.edit_menu.entryconfig('Pin to quick access', state=DISABLED)
+                elif tag == 'folder':
+                    self.file_menu.entryconfig('Open', state=NORMAL, command=self.open_folder)
+                    self.edit_menu.entryconfig('Pin to quick access', state=NORMAL)
+                self.edit_menu.entryconfig('Rename', state=NORMAL)
+            self.edit_menu.entryconfig('Delete', state=NORMAL)
+            self.edit_menu.entryconfig('Copy', state=NORMAL)
+            self.edit_menu.entryconfig('Cut', state=NORMAL)
+
+    def browser_item_delete(self, event=None):
+        if len(self.browser_list.selection()) == 1:
+            item = self.browser_list.selection()[0]
+            if self.browser_list.item(item, 'tags')[0] == 'file':
+                file_name = self.browser_list.item(item, 'values')[0]
+                response = messagebox.askyesno(title='Delete File',
+                                               message=f'Are you sure you want to permanently delete {file_name}?')
+                if response:
+                    os.remove(os.path.join(self.current_dir, file_name))
+            elif self.browser_list.item(item, 'tags')[0] == 'folder':
+                folder_name = self.browser_list.item(item, 'values')[0]
+                response = messagebox.askyesno(title='Delete Folder',
+                                               message=f'Are you sure you want to permanently delete {folder_name}?')
+                if response:
+                    # We use shutil here because os library can only remove empty folders for safety reasons
+                    shutil.rmtree(os.path.join(self.current_dir, folder_name))
+                    self.unpin_dir(os.path.join(self.current_dir, folder_name))
+        else:
+            response = messagebox.askyesno(title='Delete multiple items',
+                                           message=('Are you sure you want to permanently delete these '
+                                                    f'{len(self.browser_list.selection())} items?'))
+            if response:
+                for item in self.browser_list.selection():
+                    if self.browser_list.item(item, 'tags')[0] == 'file':
+                        file_name = self.browser_list.item(item, 'values')[0]
+                        os.remove(os.path.join(self.current_dir, file_name))
+                    elif self.browser_list.item(item, 'tags')[0] == 'folder':
+                        folder_name = self.browser_list.item(item, 'values')[0]
+                        os.rmdir(os.path.join(self.current_dir, folder_name))
+                        self.unpin_dir(os.path.join(self.current_dir, folder_name))
+        self.refresh_browser()
+
+    def browser_item_rename(self, event=None):
+        if len(self.browser_list.selection()) > 1:
+            messagebox.showerror(title='Rename Item', message='You can only rename one item at a time')
+        else:
+            item_type = self.browser_list.item(self.browser_list.selection()[0], 'tags')[0]
+            selected_item = self.browser_list.selection()[0]
+            old_name = self.browser_list.item(selected_item, 'values')[0]
+            old_name = os.path.join(self.current_dir, old_name)
+            new_name = utils.input_string_dialog(title='Rename Item',
+                                                 prompt='Please type the new name',
+                                                 theme=self.theme)
+            if new_name:
+                # Retain file extension if the selected item is a file
+                if os.path.isfile(old_name):
+                    file_extension = os.path.splitext(old_name)[1]
+                    if not new_name.endswith(file_extension):
+                        new_name += file_extension
+                # Check if new name already exists
+                new_name = os.path.join(self.current_dir, new_name)
+                if os.path.exists(new_name):
+                    return messagebox.showerror(title='Rename Item',
+                                                message=f'{item_type} name "{new_name}" already exists.')
+                os.rename(old_name, new_name)
+                self.refresh_browser()
+
+    def new_folder(self, event=None):
+        new_folder = utils.input_string_dialog(title='New Folder',
+                                               prompt='Enter new folder name',
+                                               theme=self.theme)
+        if new_folder:
+            # Check if folder name already exists
+            if os.path.exists(os.path.join(self.current_dir, new_folder)):
+                return messagebox.showerror(title='New Folder',
+                                            message=f'Folder name "{new_folder}" already exists')
+            os.makedirs(os.path.join(self.current_dir, new_folder))
+            self.refresh_browser()
+
+    def select_all(self, event=None):
+        for item in self.browser_list.get_children():
+            self.browser_list.focus(item)
+            self.browser_list.selection_add(item)
+
+    def select_none(self, event=None):
+        for item in self.browser_list.selection():
+            self.browser_list.selection_remove(item)
+
+    def invert_selection(self, event=None):
+        for item in self.browser_list.get_children():
+            if item in self.browser_list.selection():
+                self.browser_list.selection_remove(item)
+            else:
+                self.browser_list.focus(item)
+                self.browser_list.selection_add(item)
+
+    def clipboard_item(self, clipboard_type, event=None):
+        assert clipboard_type in ('cut', 'copy'), 'Clipboard can only be either copy or cut'
+        self.clipboard_clear()
+        clipboard = ''
+        for item in self.browser_list.selection():
+            item = self.browser_list.item(item, 'values')[0]
+            item = os.path.join(self.current_dir, item)
+            clipboard += item + '|'
+        if clipboard:
+            self.clipboard_append(clipboard.strip('|'))
+            self.clipboard_type.set(clipboard_type)
+        self.update()
+
+    def paste_item(self, event=None):
+        clipboard = self.clipboard_get().split('|')
+        if self.clipboard_type.get() == 'cut':
+            for item in clipboard:
+                item_name = os.path.split(item)[1]
+                try:
+                    os.rename(item, os.path.join(self.current_dir, item_name))
+                except FileExistsError:
+                    # Abort duplicated items
+                    messagebox.showerror(title='Paste error', message=f'"{item_name}" already exixts in this directory')
+            self.clipboard_clear()
+            self.clipboard_type.set('')
+            self.refresh_browser()
+        elif self.clipboard_type.get() == 'copy':
+            for item in clipboard:
+                item_name = os.path.split(item)[1]
+                dst_dir = os.path.join(self.current_dir, item_name)
+                if not os.path.exists(dst_dir):
+                    if os.path.isfile(item):
+                        shutil.copyfile(item, dst_dir)
+                    elif os.path.isdir(item):
+                        shutil.copytree(item, dst_dir)
+                else:
+                    if self.current_dir == os.path.split(item)[0]:
+                        pass    # Just ignore when user attempts to copy items and paste them into the exact same place
+                    else:
+                        messagebox.showerror(title='Paste error',
+                                             message=f'"{os.path.split(item)[1]}" already exists in this directory')
+            self.refresh_browser()
+
+    # Functions related to menus (2 functions)
+    def reset_menus(self, event=None):
+        self.file_menu.entryconfig('Open', state=DISABLED, command=None)
+        self.edit_menu.entryconfig('Pin to quick access', state=DISABLED)
+        self.edit_menu.entryconfig('Rename', state=DISABLED)
+        self.edit_menu.entryconfig('Delete', state=DISABLED)
+        self.edit_menu.entryconfig('Copy', state=DISABLED)
+        self.edit_menu.entryconfig('Cut', state=DISABLED)
+
+    def trace_clipboard(self, event=None):
+        if self.clipboard_type.get():
+            self.edit_menu.entryconfig('Paste', state=NORMAL)
+        else:
+            self.edit_menu.entryconfig('Paste', state=DISABLED)
+
     # Function related to My Computer (1 function)
     def open_drive(self, event=None):
         # Add the current directory to back stack
@@ -310,6 +497,7 @@ class FileExplorerWindow(Tk):
         selected_drive = self.my_computer_list.selection()[0]
         self.current_dir = self.my_computer_list.item(selected_drive, 'values')[0].split()[-1] + '\\'
         self.title(self.my_computer_list.item(selected_drive, 'values')[0])
+        # Refresh the browser
         self.refresh_browser()
 
     # Functions related to the navigation buttons (back, forward, up) (3 functions)
@@ -348,7 +536,16 @@ class FileExplorerWindow(Tk):
                 self.forward_button.config(state=DISABLED)
             self.refresh_browser()
 
-    # Functions related to quick access (3 functions)
+    def backspace_pressed(self, event=None):
+        print(self.back_button['state'])
+        # I dunno why we need to print the state to actually get the state string from self.back_button['state']
+        # Something hilarious must be inside tkinter source code and I don't wanna check it
+        if self.back_button['state'] == DISABLED:
+            self.up_button_clicked()
+        else:
+            self.back_button_clicked()
+
+    # Functions related to quick access (4 functions)
     def refresh_quick_access(self, event=None):
         # Clear the current quick access
         for item in self.quick_access_list.get_children():
@@ -375,11 +572,24 @@ class FileExplorerWindow(Tk):
     def pin_dir(self, event=None):
         for selected_folder in self.browser_list.selection():
             # Only folders can be pinned
-            if self.browser_list.item(selected_folder)['tags'][0] == 'folder':
+            if self.browser_list.item(selected_folder, 'tags')[0] == 'folder':
                 selected_folder = self.browser_list.item(selected_folder, 'values')[0]
                 selected_dir = os.path.join(self.current_dir, selected_folder)
                 if selected_dir not in self.pinned_list:
                     self.pinned_list.append(selected_dir)
+        with open(os.path.join(self.data_path, 'pinned_list.bin'), 'wb') as f:
+            f.write('\n'.join(self.pinned_list).encode('utf-8'))
+        self.refresh_quick_access()
+
+    def unpin_dir(self, directory=None, event=None):
+        if directory:
+            # To unpin a folder given its directory
+            if directory in self.pinned_list:
+                self.pinned_list.remove(directory)
+        else:
+            # To unpin a folder directly from quick access selections
+            selected_folder = self.quick_access_list.selection()[0]
+            self.pinned_list.pop(selected_folder)
         with open(os.path.join(self.data_path, 'pinned_list.bin'), 'wb') as f:
             f.write('\n'.join(self.pinned_list).encode('utf-8'))
         self.refresh_quick_access()
@@ -476,3 +686,8 @@ class FileExplorerWindow(Tk):
             # We should only keep the latest 20 directories
             self.recent_dirs_list.pop()
         self.dir_bar['values'] = self.recent_dirs_list
+
+
+# Functions
+def new_file_explorer(title='File Explorer', size='640x480', theme='vista', directory=os.getcwd(), data_path=None):
+    return _FileExplorerWindow(title, size, theme, directory, data_path)
