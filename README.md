@@ -20,3 +20,6 @@ File Explorer app made with Python
 - 12/13/2021:
   - User can now quickly navigate to Local Disk Drives on the PC (Windows only).
   - User can now pin favourite folders to Quick Access.
+- 12/14/2021:
+  - All options in the menus are now working.
+  - Added various keyboard shortcut similar to MS Windows File Explorer.

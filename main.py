@@ -2,4 +2,4 @@ from window import *
 
 
 if __name__ == '__main__':
-    FileExplorerWindow()
+    new_file_explorer(directory='C:\\')
