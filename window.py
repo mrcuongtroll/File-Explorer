@@ -15,8 +15,7 @@ import utils
 # Classes
 class _FileExplorerWindow(Tk):
 
-    def __init__(self, title='File Explorer', size='640x480', theme='vista', directory=os.getcwd(),
-                 data_path=None):
+    def __init__(self, title='File Explorer', size='640x480', theme='vista', directory=os.getcwd(), data_path=None):
         super().__init__()
         # This variable is to keep track of the directory we're currently browsing
         self.current_dir = directory
@@ -56,7 +55,7 @@ class _FileExplorerWindow(Tk):
         self.style.theme_use(self.theme)
 
         # Menu: including menus
-        self.menu = Menu(self)
+        self.menu = Menu(self, tearoff=False)
         self.config(menu=self.menu)
         # File menu contains basic options for an app like settings, help, exit...
         self.file_menu = Menu(self.menu)
@@ -131,7 +130,6 @@ class _FileExplorerWindow(Tk):
         self.left_frame = ttk.Frame(self, relief=FLAT, padding=2)
         self.left_frame.grid(row=1, column=0, sticky=N+S)
         # Quick access: lets you quickly access special directories like Desktop, Documents, Downloads...
-        # Future extension: let the users pin favourite directories here
         self.quick_access = ttk.LabelFrame(self.left_frame, text='Quick access')
         self.quick_access.pack(side=TOP, fill=Y, expand=True)
         self.quick_access_scrollbar = ttk.Scrollbar(self.quick_access, orient=VERTICAL)
@@ -147,6 +145,18 @@ class _FileExplorerWindow(Tk):
         self.quick_access_list.column('Name')
         self.quick_access_list.tag_bind('pinned', '<Double-1>', self.open_pinned_dir)
         self.quick_access_list.tag_bind('pinned', '<Return>', self.open_pinned_dir)
+        self.quick_access_menu = Menu(self.quick_access_list, tearoff=False)
+        self.quick_access_menu.add_command(label='Open', state=DISABLED, command=self.open_pinned_dir)
+        self.quick_access_menu.add_command(label='Open in new window', state=DISABLED,
+                                           command=self.open_pinned_dir_in_new_window)
+        self.quick_access_menu.add_command(label='Unpin from quick access', state=DISABLED, command=self.unpin_dir)
+        self.quick_access_menu.add_command(label='Refresh', command=self.refresh_quick_access)
+        # Bindings:
+        self.quick_access_list.bind('<Button-1>',
+                                    lambda e: self.quick_access_selection_clear()
+                                    if not self.quick_access_list.identify_row(e.y) else None)
+        self.quick_access_list.bind('<Button-3>', self.quick_access_menu_popup)
+        self.quick_access_list.bind('<<TreeviewSelect>>', self.quick_access_item_select)
         # My computer: lets you quickly access the disk drives (C, D, E...)
         self.my_computer = ttk.LabelFrame(self.left_frame, text='This PC')
         self.my_computer.pack(side=BOTTOM, fill=Y, expand=True)
@@ -209,7 +219,24 @@ class _FileExplorerWindow(Tk):
         for column in self.browser_list['columns']:
             self.browser_list.column(column, minwidth=40, stretch=NO)
             self.browser_list.heading(column, text=column)
+        # Right click menu (shows up when the user right-click an item in the browser list)
+        self.browser_menu = Menu(self.browser_list, tearoff=False)
+        self.browser_menu.add_command(label='Open', state=DISABLED, command=None)
+        self.browser_menu.add_command(label='Open in new window', state=DISABLED, command=self.open_in_new_window)
+        self.browser_menu.add_command(label='Pin to quick access', state=DISABLED, command=self.pin_dir)
+        self.browser_menu.add_separator()
+        self.browser_menu.add_command(label='Refresh', command=self.refresh_browser)
+        self.browser_menu.add_command(label='New folder', command=self.new_folder)
+        self.browser_menu.add_separator()
+        self.browser_menu.add_command(label='Rename', state=DISABLED, command=self.browser_item_rename)
+        self.browser_menu.add_command(label='Delete', state=DISABLED, command=self.browser_item_delete)
+        self.browser_menu.add_separator()
+        self.browser_menu.add_command(label='Copy', state=DISABLED, command=lambda: self.clipboard_item('copy'))
+        self.browser_menu.add_command(label='Cut', state=DISABLED, command=lambda: self.clipboard_item('cut'))
+        self.browser_menu.add_command(label='Paste', state=DISABLED, command=self.paste_item)
         # Bindings:
+        self.browser_list.bind('<Button-1>',
+                               lambda e: self.select_none(e) if not self.browser_list.identify_row(e.y) else None)
         self.browser_list.tag_bind('file', '<Double-1>', callback=self.execute_file)
         self.browser_list.tag_bind('file', '<Return>', callback=self.execute_file)
         self.browser_list.tag_bind('file', '<<TreeviewSelect>>',
@@ -224,16 +251,16 @@ class _FileExplorerWindow(Tk):
         self.browser_list.bind('<Control-c>', lambda event: self.clipboard_item('copy'))
         self.browser_list.bind('<Control-x>', lambda event: self.clipboard_item('cut'))
         self.browser_list.bind('<Control-v>', self.paste_item)
+        self.browser_list.bind('<Button-3>', self.browser_menu_popup)
         # The browser view is the main component => Put more weight to it.
         self.main_frame.columnconfigure(0, weight=1)
         self.main_frame.rowconfigure(0, weight=1)
-        # TODO: add right click menu
 
         self.refresh_browser()
         self.mainloop()
     # __init__ ends here
 
-    # Functions related to the main browser ()
+    # Functions related to the main browser (13 functions)
     # An important function that is used very often
     def refresh_browser(self, event=None):
         # This function will refresh the browser and list all the items inside the current working directory
@@ -293,6 +320,7 @@ class _FileExplorerWindow(Tk):
         self.search_bar.insert(0, 'Search ' + os.path.split(self.current_dir)[1])
         # Reset menus, since all rows in the browser are now de-selected
         self.reset_menus()
+        self.reset_browser_menu()
         # Put the path in the head of recent directories list
         self.add_recent_dir()
         # Refresh quick access occasionally
@@ -321,25 +349,48 @@ class _FileExplorerWindow(Tk):
         self.title(folder_name)
         self.refresh_browser()
 
+    def open_in_new_window(self, event=None):
+        # Technically multiple windows can be opened. But for simplicity, we'll restrict it to only 1 window at a time
+        if len(self.browser_list.selection()) > 1:
+            messagebox.showerror(title='Open window', message='You can open only 1 new window at a time.')
+        # Only folders can be opened in new windows (obviously)
+        item = self.browser_list.selection()[0]
+        if self.browser_list.item(item, 'tags')[0] == 'folder':
+            folder_name = self.browser_list.item(item, 'values')[0]
+            directory = os.path.join(self.current_dir, folder_name)
+            _FileExplorerWindow(directory=directory, data_path=self.data_path)
+
     def browser_items_select(self, tag, event=None):
         # This function is called when the selection that involves some items is changed in the browser
         if not self.browser_list.selection():
             # If nothing is selected on the browser, then deactivate some menu options
             self.reset_menus()
+            self.reset_browser_menu()
         else:
             # Enable menu options based on the type of the selected items (files/folders)
             if len(self.browser_list.selection()) == 1:
                 # These options should only be applied to one item at a time
                 if tag == 'file':
                     self.file_menu.entryconfig('Open', state=NORMAL, command=self.execute_file)
-                    self.edit_menu.entryconfig('Pin to quick access', state=DISABLED)
+                    self.browser_menu.entryconfig('Open', state=NORMAL, command=self.execute_file)
+                    self.browser_menu.entryconfig('Open in new window', state=DISABLED)
                 elif tag == 'folder':
                     self.file_menu.entryconfig('Open', state=NORMAL, command=self.open_folder)
-                    self.edit_menu.entryconfig('Pin to quick access', state=NORMAL)
+                    self.browser_menu.entryconfig('Open', state=NORMAL, command=self.open_folder)
+                    self.browser_menu.entryconfig('Open in new window', state=NORMAL)
                 self.edit_menu.entryconfig('Rename', state=NORMAL)
+                self.browser_menu.entryconfig('Rename', state=NORMAL)
+            else:
+                self.reset_menus()
+                self.reset_browser_menu()
+            self.edit_menu.entryconfig('Pin to quick access', state=NORMAL)
+            self.browser_menu.entryconfig('Pin to quick access', state=NORMAL)
             self.edit_menu.entryconfig('Delete', state=NORMAL)
+            self.browser_menu.entryconfig('Delete', state=NORMAL)
             self.edit_menu.entryconfig('Copy', state=NORMAL)
+            self.browser_menu.entryconfig('Copy', state=NORMAL)
             self.edit_menu.entryconfig('Cut', state=NORMAL)
+            self.browser_menu.entryconfig('Cut', state=NORMAL)
 
     def browser_item_delete(self, event=None):
         if len(self.browser_list.selection()) == 1:
@@ -470,6 +521,27 @@ class _FileExplorerWindow(Tk):
                                              message=f'"{os.path.split(item)[1]}" already exists in this directory')
             self.refresh_browser()
 
+    # Functions related to browser menu (2 functions)
+    def reset_browser_menu(self, event=None):
+        self.browser_menu.entryconfig('Open', state=DISABLED, command=None)
+        self.browser_menu.entryconfig('Open in new window', state=DISABLED)
+        self.browser_menu.entryconfig('Pin to quick access', state=DISABLED)
+        self.browser_menu.entryconfig('Rename', state=DISABLED)
+        self.browser_menu.entryconfig('Delete', state=DISABLED)
+        self.browser_menu.entryconfig('Copy', state=DISABLED)
+        self.browser_menu.entryconfig('Cut', state=DISABLED)
+
+    def browser_menu_popup(self, event=None):
+        iid = self.browser_list.identify_row(event.y)
+        if iid:
+            if iid not in self.browser_list.selection():
+                self.select_none()
+                self.browser_list.selection_set(iid)
+            self.browser_list.focus(iid)
+        else:
+            self.select_none()
+        self.browser_menu.tk_popup(event.x_root, event.y_root)
+
     # Functions related to menus (2 functions)
     def reset_menus(self, event=None):
         self.file_menu.entryconfig('Open', state=DISABLED, command=None)
@@ -482,8 +554,10 @@ class _FileExplorerWindow(Tk):
     def trace_clipboard(self, event=None):
         if self.clipboard_type.get():
             self.edit_menu.entryconfig('Paste', state=NORMAL)
+            self.browser_menu.entryconfig('Paste', state=NORMAL)
         else:
             self.edit_menu.entryconfig('Paste', state=DISABLED)
+            self.browser_menu.entryconfig('Paste', state=DISABLED)
 
     # Function related to My Computer (1 function)
     def open_drive(self, event=None):
@@ -500,7 +574,7 @@ class _FileExplorerWindow(Tk):
         # Refresh the browser
         self.refresh_browser()
 
-    # Functions related to the navigation buttons (back, forward, up) (3 functions)
+    # Functions related to the navigation buttons (back, forward, up) (4 functions)
     def up_button_clicked(self, event=None):
         # Add the current directory to back stack
         self.back_stack.append(self.current_dir)
@@ -545,7 +619,7 @@ class _FileExplorerWindow(Tk):
         else:
             self.back_button_clicked()
 
-    # Functions related to quick access (4 functions)
+    # Functions related to quick access (8 functions)
     def refresh_quick_access(self, event=None):
         # Clear the current quick access
         for item in self.quick_access_list.get_children():
@@ -569,6 +643,14 @@ class _FileExplorerWindow(Tk):
                                           index=END,
                                           values=(dir_name,))
 
+    def quick_access_item_select(self, event=None):
+        if not self.quick_access_list.selection():
+            self.quick_access_selection_clear()
+        else:
+            self.quick_access_menu.entryconfig('Open', state=NORMAL)
+            self.quick_access_menu.entryconfig('Open in new window', state=NORMAL)
+            self.quick_access_menu.entryconfig('Unpin from quick access', state=NORMAL)
+
     def pin_dir(self, event=None):
         for selected_folder in self.browser_list.selection():
             # Only folders can be pinned
@@ -588,7 +670,7 @@ class _FileExplorerWindow(Tk):
                 self.pinned_list.remove(directory)
         else:
             # To unpin a folder directly from quick access selections
-            selected_folder = self.quick_access_list.selection()[0]
+            selected_folder = int(self.quick_access_list.selection()[0])
             self.pinned_list.pop(selected_folder)
         with open(os.path.join(self.data_path, 'pinned_list.bin'), 'wb') as f:
             f.write('\n'.join(self.pinned_list).encode('utf-8'))
@@ -606,6 +688,23 @@ class _FileExplorerWindow(Tk):
         self.current_dir = self.pinned_list[selected_dir]
         self.title(self.quick_access_list.item(selected_dir, 'values')[0])
         self.refresh_browser()
+
+    def open_pinned_dir_in_new_window(self, event=None):
+        # Quick access is in single-item select mode, so we don't need to check for multiple items selection
+        iid = int(self.quick_access_list.selection()[0])
+        _FileExplorerWindow(directory=self.pinned_list[iid], data_path=self.data_path)
+
+    def quick_access_menu_popup(self, event=None):
+        iid = self.quick_access_list.identify_row(event.y)
+        if iid:
+            self.quick_access_selection_clear()
+            self.quick_access_list.selection_set(iid)
+            self.quick_access_list.focus(iid)
+        self.quick_access_menu.tk_popup(event.x_root, event.y_root)
+
+    def quick_access_selection_clear(self, event=None):
+        for item in self.quick_access_list.selection():
+            self.quick_access_list.selection_remove(item)
 
     # Functions related to search bar (3 functions)
     def search_bar_focus_in(self, event=None):
