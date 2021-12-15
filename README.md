@@ -23,3 +23,5 @@ File Explorer app made with Python
 - 12/14/2021:
   - All options in the menus are now working.
   - Added various keyboard shortcut similar to MS Windows File Explorer.
+- 12/15/2021:
+  - Added right-click option

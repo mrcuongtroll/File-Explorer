@@ -1,5 +1,7 @@
 from window import *
+import os
 
 
 if __name__ == '__main__':
-    new_file_explorer(directory='C:\\')
+    # For Windows
+    new_file_explorer(directory=os.environ.get('HOMEDRIVE')+os.environ.get('HOMEPATH'))
